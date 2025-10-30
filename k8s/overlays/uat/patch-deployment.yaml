@@ -1,0 +1,20 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app
+  labels:
+    app: fintech-app
+  namespace: fintech-uat
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: fintech-app
+  template:
+    metadata:
+      labels:
+        app: fintech-app
+    spec:
+      containers:
+      - name: fintech-app
+        image: 999568710647.dkr.ecr.us-east-2.amazonaws.com/fintech-app:IMAGE_TAG

@@ -1,0 +1,4 @@
+resources:
+- storage_class.yaml
+- fluentd.yaml
+- elasticsearch.yaml

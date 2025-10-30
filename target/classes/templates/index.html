@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>FinTech Expense Tracker</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <!-- Fonts & Styles -->
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/assets/css/style.css" />
+
+  <style>
+    body {
+      font-family: 'Poppins', sans-serif;
+      margin: 0;
+      padding: 0;
+      background-image: url('/assets/images/card-preview.png');
+      background-size: cover;
+      background-position: center;
+      background-attachment: fixed;
+      color: #fff;
+    }
+
+    .landing-container {
+      background: rgba(30, 42, 56, 0.88);
+      backdrop-filter: blur(8px);
+      border-radius: 14px;
+      max-width: 640px;
+      margin: 6rem auto;
+      padding: 2.5rem 2rem;
+      text-align: center;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+    }
+
+    .landing-container img.logo-main {
+      width: 180px;
+      margin-bottom: 1.5rem;
+    }
+
+    .landing-container h1 {
+      font-size: 2.2rem;
+      color: #ffffff;
+      margin-bottom: 1.2rem;
+    }
+
+    .landing-container p {
+      font-size: 1.15rem;
+      color: #f3f3f3;
+      font-weight: 600;
+      margin-bottom: 2rem;
+    }
+
+    .landing-buttons {
+      display: flex;
+      gap: 1rem;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+
+    .landing-buttons a {
+      display: inline-block;
+      padding: 0.9rem 1.8rem;
+      font-size: 1.05rem;
+      font-weight: 600;
+      color: white;
+      background-color: #C7A35C;
+      border-radius: 8px;
+      text-decoration: none;
+      transition: background-color 0.3s ease, transform 0.2s ease;
+    }
+
+    .landing-buttons a:hover {
+      background-color: #A9742C;
+      transform: translateY(-2px);
+    }
+
+    footer {
+      text-align: center;
+      padding: 1rem 0 2rem;
+      font-size: 0.9rem;
+      color: #ffffff;
+    }
+
+    @media (max-width: 600px) {
+      .landing-container {
+        margin: 1rem;
+        padding: 2rem;
+      }
+
+      .landing-container h1 {
+        font-size: 1.75rem;
+      }
+
+      .landing-buttons a {
+        width: 100%;
+        text-align: center;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="landing-container">
+    <img src="/assets/images/logo-full.png" alt="FinTech Logo" class="logo-main" />
+    <h1>Welcome to FinTech Expense Tracker</h1>
+    <p>Track, analyze, and optimize your spending. Safe, smart, and simple.</p>
+
+    <div class="landing-buttons">
+      <a href="/expenses/dashboard">📊 Dashboard</a>
+      <a href="/expenses">🧾 Expense Manager</a>
+      <a href="/cards/new">💳 Add Credit Card</a>
+    </div>
+  </div>
+
+  <footer>
+    &copy; 2025 FinTech Expense Tracker. All rights reserved.
+  </footer>
+</body>
+</html>

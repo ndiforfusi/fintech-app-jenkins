@@ -1,0 +1,42 @@
+version: '3.8'
+
+services:
+  fintech-mysql:
+    image: mysql:8.0
+    container_name: fintech-mysql
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass
+      MYSQL_DATABASE: fintech
+      MYSQL_USER: fintech_user
+      MYSQL_PASSWORD: fintech_pass
+    volumes:
+      - db_data:/var/lib/mysql
+    networks:
+      - fintech-net
+    ports:
+      - "3306:3306"
+
+  fintech-app:
+    image: fintech-app
+    container_name: fintech-app
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    depends_on:
+      - fintech-mysql
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://fintech-mysql:3306/fintech
+      SPRING_DATASOURCE_USERNAME: fintech_user
+      SPRING_DATASOURCE_PASSWORD: fintech_pass
+    networks:
+      - fintech-net
+
+volumes:
+  db_data:
+
+networks:
+  fintech-net:
+    driver: bridge

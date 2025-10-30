@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <title>Add Credit Card | FinTech</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    
+    <!-- Fonts & Styles -->
+    <link rel="stylesheet" href="/assets/css/style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet">
+
+    <style>
+        body {
+            font-family: 'Poppins', sans-serif;
+            background-image: url('/assets/images/dashboard-bg.jpg');
+            background-size: cover;
+            background-attachment: fixed;
+            margin: 0;
+            padding: 0;
+            color: #333;
+        }
+
+        .top-logo {
+            text-align: center;
+            margin-top: 2rem;
+        }
+
+        .top-logo img {
+            height: 100px; /* ✅ Updated to 100px */
+        }
+
+        .nav-center {
+            text-align: center;
+            margin: 1.5rem 0 2.5rem;
+        }
+
+        .nav-center a {
+            text-decoration: none;
+            color: #A9742C;
+            font-weight: bold;
+            font-size: 1.1rem;
+            margin: 0 1.5rem;
+        }
+
+        .card-form-container {
+            max-width: 600px;
+            margin: auto;
+            background-color: rgba(255, 255, 255, 0.96);
+            padding: 2.5rem;
+            border-radius: 12px;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+        }
+
+        h2 {
+            text-align: center;
+            color: #A9742C;
+            margin-bottom: 2rem;
+            font-size: 1.8rem;
+        }
+
+        .form-group {
+            margin-bottom: 1.2rem;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 0.4rem;
+            font-weight: 600;
+            color: #1E2A38;
+        }
+
+        .form-group input,
+        .form-group select {
+            width: 100%;
+            padding: 0.65rem;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            font-size: 1rem;
+        }
+
+        .form-group button {
+            width: 100%;
+            padding: 0.75rem;
+            background-color: #C7A35C;
+            color: white;
+            font-weight: bold;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+            margin-top: 1.5rem;
+        }
+
+        .form-group button:hover {
+            background-color: #A9742C;
+        }
+
+        @media (max-width: 600px) {
+            .nav-center a {
+                display: block;
+                margin: 0.5rem auto;
+            }
+
+            .top-logo img {
+                height: 70px;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Top Logo -->
+    <div class="top-logo">
+        <img src="/assets/images/logo-icon.png" alt="FinTech Logo">
+    </div>
+
+    <!-- Navigation -->
+    <div class="nav-center">
+        <a href="/">🏠 Home</a>
+        <a href="/expenses/dashboard">📊 Dashboard</a>
+        <a href="/expenses">🧾 Expenses</a>
+        <a href="/cards">💳 Credit Cards</a>
+    </div>
+
+    <!-- Form -->
+    <div class="card-form-container">
+        <h2>Add New Credit Card</h2>
+        <form method="post" action="/cards" th:object="${card}">
+            <div class="form-group">
+                <label for="cardHolderName">Card Holder Name</label>
+                <input type="text" id="cardHolderName" name="cardHolderName" th:field="*{cardHolderName}" required>
+            </div>
+
+            <div class="form-group">
+                <label for="maskedNumber">Masked Number</label>
+                <input type="text" id="maskedNumber" name="maskedNumber" placeholder="**** **** **** 1234" th:field="*{maskedNumber}" required>
+            </div>
+
+            <div class="form-group">
+                <label for="cardType">Card Type</label>
+                <select id="cardType" name="cardType" th:field="*{cardType}" required>
+                    <option value="">-- Select Type --</option>
+                    <option value="Visa">Visa</option>
+                    <option value="MasterCard">MasterCard</option>
+                    <option value="Amex">American Express</option>
+                    <option value="Discover">Discover</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="expiry">Expiry Date</label>
+                <input type="date" id="expiry" name="expiry" th:field="*{expiry}" required>
+            </div>
+
+            <div class="form-group">
+                <label for="creditLimit">Credit Limit ($)</label>
+                <input type="number" id="creditLimit" name="creditLimit" step="0.01" th:field="*{creditLimit}" required>
+            </div>
+
+            <div class="form-group">
+                <button type="submit">➕ Add Card</button>
+            </div>
+        </form>
+    </div>
+
+</body>
+</html>

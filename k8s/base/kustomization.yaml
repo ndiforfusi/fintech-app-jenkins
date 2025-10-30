@@ -1,0 +1,12 @@
+resources:
+- storageclass.yaml
+- mysql-pvc.yaml
+- secret-mysql.yaml
+- mysql-service.yaml
+- mysql.yaml
+- deployment.yaml       
+- service.yaml          
+- ingress.yaml
+- hpa.yaml 
+
+namespace: fintech

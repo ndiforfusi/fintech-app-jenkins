@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+  <meta charset="UTF-8">
+  <title>Expenses | FinTech</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <!-- Fonts & Styles -->
+  <link rel="stylesheet" href="/assets/css/style.css">
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet">
+
+  <style>
+    body {
+      font-family: 'Poppins', sans-serif;
+      background-image: url('/assets/images/dashboard-bg.jpg');
+      background-size: cover;
+      background-attachment: fixed;
+      margin: 0;
+      padding: 0;
+      color: #333;
+    }
+
+    .top-logo {
+      text-align: center;
+      margin-top: 2rem;
+    }
+
+    .top-logo img {
+      height: 160px;
+      max-width: 100%;
+      object-fit: contain;
+      filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.2));
+    }
+
+    .nav-center {
+      text-align: center;
+      margin: 1rem 0 2rem;
+    }
+
+    .nav-center a {
+      color: #A9742C;
+      font-weight: bold;
+      margin: 0 1.5rem;
+      font-size: 1.1rem;
+      text-decoration: none;
+    }
+
+    .nav-center a:hover {
+      text-decoration: underline;
+    }
+
+    h2 {
+      text-align: center;
+      font-size: 1.8rem;
+      color: #A9742C;
+      margin-bottom: 1rem;
+    }
+
+    .container {
+      max-width: 960px;
+      margin: auto;
+      padding: 1rem;
+      background-color: rgba(255, 255, 255, 0.96);
+      border-radius: 10px;
+      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
+    }
+
+    .download-button {
+      text-align: center;
+      margin-bottom: 1.5rem;
+    }
+
+    .download-button a {
+      padding: 0.65rem 1.5rem;
+      font-size: 1rem;
+      font-weight: bold;
+      color: white;
+      background-color: #C7A35C;
+      text-decoration: none;
+      border-radius: 6px;
+      transition: background-color 0.3s ease;
+    }
+
+    .download-button a:hover {
+      background-color: #A9742C;
+    }
+
+    .styled-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.95rem;
+      margin-bottom: 2rem;
+    }
+
+    .styled-table th,
+    .styled-table td {
+      border: 1px solid #ddd;
+      padding: 0.75rem;
+      text-align: left;
+    }
+
+    .styled-table th {
+      background-color: #C7A35C;
+      color: white;
+      font-weight: bold;
+    }
+
+    .form-group {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 1rem;
+    }
+
+    .form-group input,
+    .form-group select {
+      padding: 0.6rem;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+      font-size: 1rem;
+    }
+
+    .form-group button {
+      grid-column: span 2;
+      padding: 0.75rem 1.5rem;
+      background-color: #C7A35C;
+      color: white;
+      border: none;
+      font-weight: bold;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: background-color 0.3s ease;
+    }
+
+    .form-group button:hover {
+      background-color: #A9742C;
+    }
+
+    @media (max-width: 600px) {
+      .form-group {
+        grid-template-columns: 1fr;
+      }
+
+      .form-group button {
+        grid-column: span 1;
+      }
+
+      .nav-center a {
+        display: block;
+        margin: 0.5rem auto;
+      }
+
+      .top-logo img {
+        height: 100px;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Logo -->
+  <div class="top-logo">
+    <img src="/assets/images/logo-icon.png" alt="FinTech Logo">
+  </div>
+
+  <!-- Navigation -->
+  <div class="nav-center">
+    <a href="/">🏠 Home</a>
+    <a href="/expenses/dashboard">📊 Dashboard</a>
+    <a href="/expenses">🧾 Expenses</a>
+    <a href="/cards/new">💳 Add Credit Card</a>
+  </div>
+
+  <!-- Main Content -->
+  <div class="container">
+    <h2>Monthly Expenses</h2>
+
+    <!-- CSV Download Button -->
+    <div class="download-button">
+      <a href="/expenses/export">⬇️ Download CSV</a>
+    </div>
+
+    <!-- Expense Table -->
+    <table class="styled-table">
+      <thead>
+        <tr>
+          <th>Vendor</th>
+          <th>Amount ($)</th>
+          <th>Date</th>
+          <th>Category</th>
+          <th>Card</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr th:each="exp : ${expenses}">
+          <td th:text="${exp.vendor}">Vendor</td>
+          <td th:text="${exp.amount}">0.00</td>
+          <td th:text="${exp.date}">2025-01-01</td>
+          <td th:text="${exp.category}">Category</td>
+          <td th:text="${exp.card.maskedNumber}">**** **** **** 1234</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <!-- Add New Expense Form -->
+    <form method="post" th:object="${expense}" class="form-group">
+      <input type="text" th:field="*{vendor}" placeholder="Vendor" required>
+      <input type="number" th:field="*{amount}" step="0.01" placeholder="Amount" required>
+      <input type="date" th:field="*{date}" required>
+      <input type="text" th:field="*{category}" placeholder="Category" required>
+      <select th:field="*{card.id}" required>
+        <option value="">Select Credit Card</option>
+        <option th:each="card : ${cards}" th:value="${card.id}" th:text="${card.cardType} + ' - ' + ${card.maskedNumber}"></option>
+      </select>
+      <button type="submit">Add Expense</button>
+    </form>
+  </div>
+
+</body>
+</html>

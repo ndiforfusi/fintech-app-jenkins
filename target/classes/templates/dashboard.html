@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+  <meta charset="UTF-8">
+  <title>Dashboard | FinTech</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="/assets/css/style.css">
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <style>
+    body {
+      font-family: 'Poppins', sans-serif;
+      background-image: url('/assets/images/dashboard-bg.jpg');
+      background-size: cover;
+      background-attachment: fixed;
+      margin: 0;
+      padding: 0;
+      color: #333;
+    }
+
+    .app-header {
+      background-color: #1E2A38;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 1rem 2rem;
+    }
+
+    .logo {
+      height: 100px;
+    }
+
+    .nav-links a {
+      color: #C7A35C;
+      font-weight: bold;
+      margin-left: 1.5rem;
+      font-size: 1.1rem;
+      text-decoration: none;
+    }
+
+    .nav-links a:hover {
+      color: #A9742C;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 2rem auto;
+      padding: 2rem;
+      background-color: rgba(255, 255, 255, 0.96);
+      border-radius: 12px;
+      box-shadow: 0 6px 20px rgba(0, 0, 0, 0.1);
+    }
+
+    .dashboard-title {
+      text-align: center;
+      font-size: 1.8rem;
+      color: #A9742C;
+      margin-bottom: 2rem;
+    }
+
+    .form-labels {
+      display: grid;
+      grid-template-columns: repeat(6, 1fr);
+      gap: 1rem;
+      font-weight: 600;
+      color: #fff;
+      background-color: #C7A35C;
+      padding: 0.75rem 1rem;
+      border-radius: 6px 6px 0 0;
+    }
+
+    .dashboard-form-table {
+      display: grid;
+      grid-template-columns: repeat(6, 1fr);
+      gap: 1rem;
+      margin: 1rem 0 2rem;
+    }
+
+    .dashboard-form-table input,
+    .dashboard-form-table select {
+      padding: 0.6rem;
+      font-size: 0.95rem;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+      width: 100%;
+    }
+
+    .dashboard-form-table button {
+      grid-column: span 6;
+      padding: 0.75rem;
+      background-color: #C7A35C;
+      color: white;
+      font-weight: bold;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: background-color 0.3s ease;
+    }
+
+    .dashboard-form-table button:hover {
+      background-color: #A9742C;
+    }
+
+    .dashboard-charts-wrapper {
+      overflow-x: auto;
+      margin-top: 2rem;
+    }
+
+    .dashboard-charts {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 2rem;
+      justify-content: center;
+    }
+
+    .chart-container {
+      flex: 1 1 300px;
+      min-width: 300px;
+      max-width: 100%;
+      background: white;
+      border-radius: 8px;
+      padding: 1rem;
+      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.08);
+    }
+
+    canvas {
+      width: 100% !important;
+      height: 250px !important;
+    }
+
+    @media (max-width: 768px) {
+      .form-labels, .dashboard-form-table {
+        grid-template-columns: 1fr;
+      }
+
+      .dashboard-form-table button {
+        grid-column: span 1;
+      }
+
+      .logo {
+        height: 70px;
+      }
+
+      .nav-links a {
+        display: block;
+        margin: 0.5rem 0;
+      }
+    }
+  </style>
+</head>
+
+<body>
+
+<header class="app-header">
+  <img src="/assets/images/logo-icon.png" class="logo" alt="FinTech Logo">
+  <nav class="nav-links">
+    <a href="/">🏠 Home</a>
+    <a href="/expenses/dashboard">📈 Dashboard</a>
+    <a href="/expenses">🧾 Expenses</a>
+    <a href="/cards/new">💳 Add Card</a>
+  </nav>
+</header>
+
+<div class="container">
+  <h2 class="dashboard-title">Monthly Expenses</h2>
+
+  <!-- Header Row -->
+  <div class="form-labels">
+    <div>Vendor</div>
+    <div>Amount ($)</div>
+    <div>Date</div>
+    <div>Category</div>
+    <div>Card</div>
+    <div></div>
+  </div>
+
+  <!-- Form -->
+  <form method="post" th:object="${expense}" class="dashboard-form-table">
+    <input type="text" th:field="*{vendor}" placeholder="Vendor" required>
+    <input type="number" th:field="*{amount}" step="0.01" placeholder="Amount" required>
+    <input type="date" th:field="*{date}" required>
+    <input type="text" th:field="*{category}" placeholder="Category" required>
+    <select th:field="*{card.id}" required>
+      <option value="">Select Credit Card</option>
+      <option th:each="card : ${cards}" th:value="${card.id}" th:text="${card.cardType} + ' - ' + ${card.maskedNumber}"></option>
+    </select>
+    <button type="submit">Add Expense</button>
+  </form>
+
+  <!-- Charts -->
+  <div class="dashboard-charts-wrapper">
+    <div class="dashboard-charts">
+
+      <!-- Chart Card Template (Repeated) -->
+      <div class="chart-container">
+        <div style="text-align:right;">
+          <select onchange="toggleChartType('categoryChart', this)">
+            <option value="bar">Bar</option>
+            <option value="pie">Pie</option>
+          </select>
+          <button onclick="downloadChart('categoryChart')">📥 PNG</button>
+        </div>
+        <canvas id="categoryChart"></canvas>
+      </div>
+
+      <div class="chart-container">
+        <div style="text-align:right;">
+          <select onchange="toggleChartType('vendorChart', this)">
+            <option value="bar">Bar</option>
+            <option value="pie">Pie</option>
+          </select>
+          <button onclick="downloadChart('vendorChart')">📥 PNG</button>
+        </div>
+        <canvas id="vendorChart"></canvas>
+      </div>
+
+      <div class="chart-container">
+        <div style="text-align:right;">
+          <select onchange="toggleChartType('dailyChart', this)">
+            <option value="bar">Bar</option>
+            <option value="pie">Pie</option>
+          </select>
+          <button onclick="downloadChart('dailyChart')">📥 PNG</button>
+        </div>
+        <canvas id="dailyChart"></canvas>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- 🧠 Chart.js & Toggles -->
+<script th:inline="javascript">
+  const chartInstances = {};
+
+  const chartDataConfig = {
+    categoryChart: {
+      labels: [[${categoryLabels}]],
+      data: [[${categoryData}]],
+      label: 'Spending by Category',
+      color: '#C7A35C'
+    },
+    vendorChart: {
+      labels: [[${vendorLabels}]],
+      data: [[${vendorTotals}]],
+      label: 'Top Vendors',
+      color: '#4CAF50'
+    },
+    dailyChart: {
+      labels: [[${dailyLabels}]],
+      data: [[${dailyTotals}]],
+      label: 'Daily Spend',
+      color: '#2196F3'
+    }
+  };
+
+  const createChart = (id, type) => {
+    const ctx = document.getElementById(id).getContext('2d');
+    const cfg = chartDataConfig[id];
+
+    if (chartInstances[id]) {
+      chartInstances[id].destroy();
+    }
+
+    chartInstances[id] = new Chart(ctx, {
+      type: type,
+      data: {
+        labels: cfg.labels,
+        datasets: [{
+          label: cfg.label,
+          data: cfg.data,
+          backgroundColor: type === 'pie' ? cfg.labels.map(() => cfg.color) : cfg.color
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: type === 'pie' } },
+        scales: type === 'bar' ? {
+          y: { beginAtZero: true }
+        } : {}
+      }
+    });
+  };
+
+  const toggleChartType = (id, selectEl) => {
+    const newType = selectEl.value;
+    createChart(id, newType);
+  };
+
+  const downloadChart = (id) => {
+    const chart = chartInstances[id];
+    const link = document.createElement('a');
+    link.href = chart.toBase64Image();
+    link.download = `${id}.png`;
+    link.click();
+  };
+
+  document.addEventListener('DOMContentLoaded', () => {
+    createChart('categoryChart', 'bar');
+    createChart('vendorChart', 'bar');
+    createChart('dailyChart', 'bar');
+  });
+</script>
+
+</body>
+
+</html>

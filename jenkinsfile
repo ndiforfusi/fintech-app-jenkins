@@ -1,0 +1,292 @@
+pipeline {
+  agent { label 'linux && docker' } // adjust to your agents
+
+  /* ===== Runtime Parameters ===== */
+  parameters {
+    choice(name: 'ENVIRONMENT', choices: ['dev', 'qa', 'uat', 'prod'], description: 'Deployment Environment')
+    string(name: 'IMAGE_TAG', defaultValue: '', description: 'Docker Image Tag (leave empty to auto-generate timestamp)')
+    string(name: 'REGION', defaultValue: 'us-east-2', description: 'AWS Region')
+    string(name: 'ECR_REPO', defaultValue: 'fintech-app', description: 'ECR repository name')
+    string(name: 'ASSUME_ROLE_ARN', defaultValue: '', description: 'Optional: STS role ARN to assume (recommended)')
+    string(name: 'AWS_ACCOUNT_ID_FALLBACK', defaultValue: '327019199684', description: 'Fallback if STS not available')
+  }
+
+  /* ===== Global Environment ===== */
+  environment {
+    AWS_REGION = "${params.REGION}"
+    // If you configured Jenkins tools (Manage Jenkins -> Global Tool Configuration):
+    // MVN_HOME = tool name: 'maven-3.9.9'
+    // JAVA_HOME = tool name: 'temurin-17'
+    // PATH = "${MVN_HOME}/bin:${JAVA_HOME}/bin:${env.PATH}"
+  }
+
+  /* ===== Pipeline Controls ===== */
+  options {
+    disableConcurrentBuilds()
+    timestamps()
+    ansiColor('xterm')
+    buildDiscarder(logRotator(numToKeepStr: '30', artifactNumToKeepStr: '30'))
+    timeout(time: 60, unit: 'MINUTES')
+  }
+
+  stages {
+
+    stage('Checkout') {
+      steps {
+        checkout scm
+        script {
+          echo "Branch: ${env.BRANCH_NAME ?: 'N/A'} | PR: ${env.CHANGE_ID ?: 'no'}"
+        }
+      }
+    }
+
+    stage('Tooling Setup') {
+      steps {
+        sh """
+          java -version || true
+          mvn -version || true
+          docker --version
+          aws --version || true
+          kubectl version --client=true --short=true || true
+        """
+      }
+    }
+
+    stage('Build with Maven') {
+      steps {
+        sh '''
+          # If your agents export Maven via /etc/profile.d/maven.sh, source it:
+          [ -f /etc/profile.d/maven.sh ] && . /etc/profile.d/maven.sh || true
+          mvn -B -ntp clean package -DskipTests
+        '''
+        archiveArtifacts artifacts: 'target/**/*.jar', fingerprint: true, onlyIfSuccessful: true
+      }
+    }
+
+    stage('SonarQube Scan') {
+      when { expression { return !env.CHANGE_ID } } // skip on PRs if you prefer; adjust as needed
+      environment {
+        // Provide these via Jenkins credentials or global env (best: use SonarQube plugin & withSonarQubeEnv)
+        SONAR_HOST_URL = credentials('SONAR_HOST_URL') // Secret text credential ID
+        SONAR_TOKEN    = credentials('SONAR_TOKEN')    // Secret text credential ID
+      }
+      steps {
+        sh '''
+          mvn -B -ntp sonar:sonar \
+            -Dsonar.host.url="$SONAR_HOST_URL" \
+            -Dsonar.login="$SONAR_TOKEN" \
+            -Dsonar.projectKey=fintech-app \
+            -Dsonar.projectName=fintech-app \
+            -Dsonar.sources=. \
+            -Dsonar.java.binaries=target/classes
+        '''
+      }
+    }
+
+    stage('Determine Image Tag') {
+      environment {
+        BUILD_TS = "${new Date().format('yyyyMMddHHmmss', TimeZone.getTimeZone('UTC'))}"
+      }
+      steps {
+        script {
+          env.EFFECTIVE_IMAGE_TAG = params.IMAGE_TAG?.trim() ? params.IMAGE_TAG.trim() : env.BUILD_TS
+          echo "Using image tag: ${env.EFFECTIVE_IMAGE_TAG}"
+        }
+      }
+    }
+
+    stage('AWS Auth (Assume Role or Static)') {
+      steps {
+        script {
+          withAwsOrStaticCreds(params.REGION, params.ASSUME_ROLE_ARN) {
+            sh 'aws sts get-caller-identity'
+          }
+        }
+      }
+    }
+
+    stage('Resolve AWS Account ID') {
+      steps {
+        script {
+          env.RESOLVED_ACCOUNT_ID = resolveAccountId(params.ENVIRONMENT, params.AWS_ACCOUNT_ID_FALLBACK, params.REGION, params.ASSUME_ROLE_ARN)
+          echo "Resolved AWS Account ID: ${env.RESOLVED_ACCOUNT_ID}"
+        }
+      }
+    }
+
+    stage('Login to ECR') {
+      steps {
+        script {
+          withAwsOrStaticCreds(params.REGION, params.ASSUME_ROLE_ARN) {
+            sh """
+              aws ecr get-login-password --region ${params.REGION} | \
+              docker login --username AWS --password-stdin ${env.RESOLVED_ACCOUNT_ID}.dkr.ecr.${params.REGION}.amazonaws.com
+            """
+          }
+        }
+      }
+    }
+
+    stage('Build & Push Docker Image') {
+      steps {
+        script {
+          def imageUri = "${env.RESOLVED_ACCOUNT_ID}.dkr.ecr.${params.REGION}.amazonaws.com/${params.ECR_REPO}:${env.EFFECTIVE_IMAGE_TAG}"
+          echo "Building ${imageUri}"
+          sh """
+            docker build -t ${imageUri} .
+            docker push ${imageUri}
+          """
+          // Expose for later stages
+          env.IMAGE_URI = imageUri
+        }
+      }
+    }
+
+    stage('Deploy Gate') {
+      when {
+        allOf {
+          expression { return !env.CHANGE_ID }       // not a PR
+          anyOf {
+            branch 'main'
+            branch 'release'
+          }
+        }
+      }
+      steps {
+        script {
+          timeout(time: 20, unit: 'MINUTES') {
+            input message: "Approve deploy of ${env.IMAGE_URI} to ${params.ENVIRONMENT}?", ok: 'Deploy'
+          }
+        }
+      }
+    }
+
+    stage('Deploy to EKS') {
+      when {
+        allOf {
+          expression { return !env.CHANGE_ID } // skip on PRs
+          anyOf { branch 'main'; branch 'release' }
+        }
+      }
+      steps {
+        script {
+          withAwsOrStaticCreds(params.REGION, params.ASSUME_ROLE_ARN) {
+            sh """
+              set -euo pipefail
+
+              CLUSTER_NAME="${params.ENVIRONMENT}-dominion-cluster"
+              aws eks update-kubeconfig --region ${params.REGION} --name "$CLUSTER_NAME"
+
+              kubectl get nodes
+
+              # Optional add-ons (ensure scripts are present & executable)
+              [ -x eks_addons/script/helm_install.sh ] && eks_addons/script/helm_install.sh || true
+              [ -x eks_addons/script/helm_charts.sh ]  && eks_addons/script/helm_charts.sh  || true
+
+              # Deploy monitoring/logging overlays if present
+              [ -d ./eks_addons/monitoring ] && kubectl apply -k ./eks_addons/monitoring || true
+              [ -d ./eks_addons/elk ]        && kubectl apply -k ./eks_addons/elk        || true
+
+              # Update overlay image reference
+              ENV="${params.ENVIRONMENT}"
+              IMAGE_URI="${env.IMAGE_URI}"
+
+              FILE=""
+              for p in "./k8s/overlays/$ENV/patch-deployment.yaml" \
+                       "./fintech-app/k8s/overlays/$ENV/patch-deployment.yaml" \
+                       "/fintech-app/k8s/overlays/$ENV/patch-deployment.yaml"; do
+                if [ -f "$p" ]; then FILE="$p"; break; fi
+              done
+
+              if [ -z "$FILE" ]; then
+                echo "❌ patch-deployment.yaml not found for ENV=$ENV" >&2
+                exit 1
+              fi
+
+              echo "Patching $FILE with image: $IMAGE_URI"
+              perl -0777 -pe "s|image:\\s*[\\w\\.\\-]+\\.dkr\\.ecr\\.[\\w-]+\\.amazonaws\\.com/[\\w\\.\\-]+:[\\w\\.\\-]+|image: $IMAGE_URI|g" -i "$FILE"
+
+              echo "✅ Updated image line:"
+              grep -nE 'image:\\s' "$FILE" | head -1
+
+              # Apply kustomize overlay
+              OVERLAY_DIR=""
+              for d in "./k8s/overlays/$ENV" "./fintech-app/k8s/overlays/$ENV" "/fintech-app/k8s/overlays/$ENV"; do
+                if [ -d "$d" ]; then OVERLAY_DIR="$d"; break; fi
+              done
+              if [ -z "$OVERLAY_DIR" ]; then
+                echo "❌ Overlay dir for ENV=$ENV not found" >&2
+                exit 1
+              fi
+
+              echo "Applying overlay: $OVERLAY_DIR"
+              kubectl apply -k "$OVERLAY_DIR"
+            """
+          }
+        }
+      }
+    }
+  }
+
+  post {
+    success {
+      script {
+        slackNotify("✅ *Build Succeeded* for `${env.BRANCH_NAME ?: 'N/A'}` ENV `${params.ENVIRONMENT}` (tag `${env.EFFECTIVE_IMAGE_TAG}`)", 'good')
+      }
+    }
+    failure {
+      script {
+        slackNotify("🔥 *Build Failed* for `${env.BRANCH_NAME ?: 'N/A'}` ENV `${params.ENVIRONMENT}`", 'danger')
+      }
+    }
+    always {
+      sh '''
+        set +e
+        docker image prune -af --filter "until=24h" || true
+        docker container prune -f || true
+        docker volume prune -f || true
+      '''
+      cleanWs(deleteDirs: true, notFailBuild: true)
+    }
+  }
+}
+
+/* =============== Helpers =============== */
+
+// Prefer STS AssumeRole. If not provided, use a Jenkins AWS credential with ID 'aws-static-creds'.
+def withAwsOrStaticCreds(String region, String roleArn, Closure body) {
+  if (roleArn?.trim()) {
+    withAWS(region: region, role: roleArn, duration: 3600) { body() }
+  } else {
+    withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-static-creds']]) {
+      withEnv(["AWS_REGION=${region}"]) { body() }
+    }
+  }
+}
+
+// Resolve Account ID: try STS first (under current auth), then fallback param.
+def resolveAccountId(String envName, String fallback, String region, String roleArn) {
+  def acct = ''
+  withAwsOrStaticCreds(region, roleArn) {
+    acct = sh(script: 'aws sts get-caller-identity --query Account --output text || true', returnStdout: true).trim()
+  }
+  if (!acct || !(acct ==~ /^[0-9]{12}$/)) {
+    echo "Falling back to provided AWS_ACCOUNT_ID_FALLBACK"
+    acct = fallback?.trim()
+  }
+  if (!acct || !(acct ==~ /^[0-9]{12}$/)) {
+    error "Could not resolve a valid 12-digit AWS Account ID for ENV=${envName}"
+  }
+  return acct
+}
+
+// Slack via webhook secret text credential 'slack-webhook-url'
+def slackNotify(String msg, String color='') {
+  withCredentials([string(credentialsId: 'slack-webhook-url', variable: 'SLACK_WEBHOOK_URL')]) {
+    sh """
+      curl -s -o /dev/null -X POST -H 'Content-type: application/json' \
+        --data '{"text": ${groovy.json.StringEscapeUtils.escapeJavaScript(msg).inspect()}}' \
+        "$SLACK_WEBHOOK_URL" || true
+    """
+  }
+}

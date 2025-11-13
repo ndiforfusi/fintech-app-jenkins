@@ -7,4 +7,5 @@ resources:
 - ../../base
 
 patchesStrategicMerge:
-- patch-deployment.yaml
+- patch-deployment.yaml 
+- pa

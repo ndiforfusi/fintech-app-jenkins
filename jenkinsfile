@@ -1,10 +1,12 @@
 pipeline {
   agent { label 'maven-sonarqube' } // SSH build node with instance profile
 
+  tools {maven 'maven-3-9-11'}
+
   parameters {
     choice(name: 'ENVIRONMENT', choices: ['dev', 'qa', 'uat', 'prod'], description: 'Deployment Environment')
     string(name: 'IMAGE_TAG', defaultValue: '', description: 'Docker Image Tag (leave empty to auto-generate timestamp)')
-    string(name: 'REGION', defaultValue: 'us-east-2', description: 'AWS Region')
+    string(name: 'REGION', defaultValue: 'us-west-2', description: 'AWS Region')
     string(name: 'ECR_REPO', defaultValue: 'fintech-app', description: 'ECR repository name')
   }
 

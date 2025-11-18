@@ -1,230 +1,283 @@
-# fintech-app-jenkins
-## CI/CD (Maven → ECR → EKS) via Jenkins
+Fintech App – CI/CD Pipeline (Jenkins + SonarQube + ECR + EKS)
 
-This guide explains how to implement, run, and maintain the Jenkins Declarative Pipeline that replaces your GitHub Actions workflow. It builds the app with Maven, runs SonarQube analysis, pushes a versioned Docker image to ECR, and deploys to EKS via kustomize overlays.
+This repository contains the full CI/CD automation pipeline for the Fintech App, powered by:
 
-1) What the Pipeline Does
+Jenkins (SSH Build Node)
 
-Build & package Java app (JDK 17, Maven)
+Maven Build
 
-Static analysis via SonarQube (token or plugin)
+SonarQube Code Quality Scan
 
-Generate or accept an image tag (timestamp fallback)
+AWS ECR Image Build & Push
 
-Authenticate to AWS via STS AssumeRole (recommended) or static AWS keys
+AWS EKS Kubernetes Deployment
 
-Build & push Docker image to Amazon ECR
+Instance Profile AWS Authentication (No static creds!)
 
-Deploy to Amazon EKS (update overlay’s patch-deployment.yaml, apply kustomize overlays)
+The pipeline is optimized for enterprise DevOps workflows and cloud-native deployments.
 
-Safeguards: manual approval gate on main/release, PRs skip deploy, concurrency disabled
+📌 High-Level Architecture
+                 ┌────────────────────────┐
+                 │   Developers Commit     │
+                 │    (GitHub / GitLab)    │
+                 └────────────┬───────────┘
+                              │ Webhook / Poll
+                              ▼
+                   ┌────────────────────┐
+                   │     Jenkins CI     │
+                   │ (Controller Node)  │
+                   └──────────┬─────────┘
+                              │ SSH
+                              ▼
+              ┌─────────────────────────────────┐
+              │      Build Node (EC2 Linux)     │
+              │   - Maven Build                 │
+              │   - SonarQube Scan              │
+              │   - Docker Build & Push         │
+              │   - kubectl Deploy to EKS       │
+              │   - Uses Instance Profile Auth  │
+              └───────────┬─────────────────────┘
+                          │
+                          ▼
+            ┌──────────────────────────┐
+            │       AWS ECR            │
+            │  (Stores Docker Images)  │
+            └──────────┬───────────────┘
+                       │
+                       ▼
+            ┌──────────────────────────┐
+            │         AWS EKS          │
+            │ (Kubernetes Deployment)  │
+            └──────────────────────────┘
 
-Notifications: Slack webhook on success/failure
+🎯 Pipeline Capabilities
 
-Hygiene: artifact JARs, clean Docker/cache, redact secrets
+✔ Automated Maven build
+✔ Automated SonarQube Quality Scan
+✔ Docker image build and push to ECR
+✔ Automated Kubernetes deployment using EKS
+✔ Optional manual approval checkpoint
+✔ Automatic account detection using EC2 Instance Profile
+✔ Zero static AWS credentials required
+✔ Supports multiple environments: dev, qa, uat, prod
+✔ Kustomize overlays for environment-specific deployments
 
-2) Repository Layout
-.
-├─ Jenkinsfile
-├─ pom.xml
-├─ src/...
-├─ eks_addons/
-│  ├─ script/
-│  │  ├─ helm_install.sh
-│  │  └─ helm_charts.sh
-│  ├─ monitoring/   (kustomize)
-│  └─ elk/          (kustomize)
-├─ k8s/
-│  └─ overlays/
-│     ├─ dev/
-│     │  ├─ kustomization.yaml
-│     │  └─ patch-deployment.yaml
-│     ├─ qa/
-│     ├─ uat/
-│     └─ prod/
-└─ fintech-app/ (optional alternative path for overlays)
+🧩 Prerequisites
 
+Your Jenkins build node must have:
 
-The pipeline searches for patch-deployment.yaml and overlay dirs at:
+sudo apt install docker.io kubectl openjdk-17-jdk maven awscli -y
 
-./k8s/overlays/$ENV
 
-./fintech-app/k8s/overlays/$ENV
+Your Jenkins controller must have:
 
-/fintech-app/k8s/overlays/$ENV
+Jenkins configured with:
 
-3) Jenkins Prerequisites
-Plugins
+SSH Agent Plugin
 
-Pipeline (workflow-aggregator)
+Pipeline Plugin
 
-Git or GitHub Branch Source (for Multibranch)
+Credentials Plugin
 
-Credentials Binding
+SonarQube Plugin (optional)
 
-AWS Steps (for withAWS AssumeRole)
+SonarQube server must have:
 
-AnsiColor
+A project named: fintech-app
 
-Timestamper
+A token stored in Jenkins (SONAR_TOKEN)
 
-(Optional) Slack plugin — not required if you use webhook as in the Jenkinsfile
+⚙️ 1. Configure the Jenkins Build Node (EC2)
+1️⃣ Create the Linux user
+sudo useradd -m sonar -s /bin/bash
+sudo passwd sonar
 
-(Optional) SonarQube Scanner plugin (alternatively use Maven sonar goal + token)
+2️⃣ Add the SSH key for Jenkins
 
-Agents / Tooling
+On the build node:
 
-Linux agent(s) with:
+sudo su - sonar
+mkdir -p ~/.ssh
+chmod 700 ~/.ssh
+nano ~/.ssh/authorized_keys   # paste Jenkins private key's public part
+chmod 600 ~/.ssh/authorized_keys
 
-JDK 17 (Temurin/OpenJDK)
+3️⃣ Give Docker permission
+sudo usermod -aG docker sonar
 
-Maven 3.9+
 
-Docker (build & push)
+Logout & login again.
 
-AWS CLI v2
+4️⃣ Create Jenkins workspace directory
+sudo mkdir -p /home/sonar/jenkins
+sudo chown -R sonar:sonar /home/sonar/jenkins
 
-kubectl
+🔐 2. Configure Jenkins Controller
+1️⃣ Add SSH Credentials
 
-(optional) helm, kustomize (kustomize is part of kubectl -k)
+In Manage Jenkins → Credentials → Global:
 
-Ensure the Jenkins agent user can access Docker (docker group or rootless podman adaptation).
+Kind: SSH Username with Private Key
 
-Credentials (Jenkins → Manage Credentials)
+ID: ssh-sonarqube
 
-aws-static-creds (AWS Credentials, only if not using AssumeRole)
+Username: sonar
 
-SONAR_HOST_URL (Secret text) — e.g., https://sonar.myorg.com
+Private Key: paste private key
 
-SONAR_TOKEN (Secret text)
+2️⃣ Add SonarQube Credentials
 
-slack-webhook-url (Secret text) — your Slack Incoming Webhook
+Secret Text:
 
-Recommended: Use STS AssumeRole (set ASSUME_ROLE_ARN param). The AWS credential used by Jenkins (controller/agent) must be allowed to sts:AssumeRole on the target role.
+ID: SONAR_TOKEN
 
-4) Job Setup
-Multibranch Pipeline (recommended)
+TEXT: <SonarQube token>
 
-New Item → Multibranch Pipeline
+Secret Text:
 
-Set GitHub or Git (repo URL + credentials if needed)
+ID: SONAR_HOST_URL
 
-Save & Scan Multibranch
+TEXT: http://<your-sonarqube-server>:9000
 
-Jenkins auto-creates jobs for each branch & PR
+3️⃣ Add Node
 
-Classic Pipeline (single)
+Manage Jenkins → Nodes → New Node
 
-New Item → Pipeline
+Name: maven-sonarqube-build-node
 
-Pipeline script from SCM → repo URL, Jenkinsfile
+Remote root: /home/sonar/jenkins
 
-Enable This project is parameterized (Jenkinsfile already defines params)
+Labels: maven-sonarqube
 
-5) Parameters
+Launch method: SSH
 
-ENVIRONMENT: dev|qa|uat|prod
+Credentials: ssh-sonarqube
 
-IMAGE_TAG: optional; leave blank to auto-generate UTC timestamp (e.g., 20251030123456)
+Click Save → Jenkins will launch the node.
 
-REGION: default us-east-2
+🛡 3. AWS Permissions via Instance Profile
 
-ECR_REPO: default fintech-app
+Attach an IAM role with the following permissions to the EC2 build node:
 
-ASSUME_ROLE_ARN: target role to assume (preferred)
+Must-Have Policies:
+ECR
+ecr:GetAuthorizationToken
+ecr:BatchGetImage
+ecr:GetDownloadUrlForLayer
+ecr:PutImage
 
-AWS_ACCOUNT_ID_FALLBACK: used only if STS is unavailable
+EKS
+eks:DescribeCluster
 
-6) Branch & PR Behavior
+STS
+sts:GetCallerIdentity
 
-PR builds: build (and optionally Sonar) — no deploy.
+Kubernetes RBAC (inside EKS cluster)
 
-main / release branches: build → approval gate → deploy to EKS.
+Map the instance profile role in:
 
-Concurrency is disabled to avoid overlapping builds on the same job.
+aws-auth ConfigMap
 
-Adjust the when conditions in Deploy Gate and Deploy to EKS stages if you want different rules (e.g., only release deploys).
+🧪 4. Pipeline Execution Flow
+▶ When the pipeline runs:
+1. Checkout
 
-7) AWS Authentication & Account Resolution
+Pulls the source code.
 
-The Jenkinsfile:
+2. Build
 
-Tries AssumeRole (withAWS) if ASSUME_ROLE_ARN provided.
+Runs Maven:
 
-Otherwise uses a static credential binding (aws-static-creds).
+mvn clean package -DskipTests
 
-Resolves Account ID via aws sts get-caller-identity.
+3. SonarScan
 
-Falls back to AWS_ACCOUNT_ID_FALLBACK if STS is not available.
+Runs static analysis:
 
-Ensure the ECR registry exists in the resolved account (${account}.dkr.ecr.${region}.amazonaws.com) and the repository ${ECR_REPO} is created (you can aws ecr create-repository once).
+mvn sonar:sonar -Dsonar.login=$SONAR_TOKEN
 
-8) EKS Deployment (kustomize overlays)
+4. Image Build + Push
 
-Cluster is named ${ENVIRONMENT}-dominion-cluster (customize this in Jenkinsfile if yours differs).
+Builds and pushes Docker image to ECR.
 
-The pipeline:
+5. Approval Gate (only on main/release)
 
-aws eks update-kubeconfig
+Jenkins asks:
 
-Optionally runs add-on shell scripts (helm install & charts)
+Deploy image <tag> to <environment>?
 
-Patches the image in patch-deployment.yaml
+6. Deploy to EKS
 
-Runs kubectl apply -k <overlay dir>
+Kustomize overlay patch + rollout:
 
-Requirement: Your overlay’s deployment must reference the same container that the patch adjusts.
+kubectl apply -k ./k8s/overlays/<env>
 
-9) Slack Notifications
+🧭 5. Running the Pipeline Manually
 
-Success/Failure notifications are sent via webhook using credential slack-webhook-url.
+In Jenkins:
 
-Update the helper slackNotify or swap to the Slack plugin if preferred.
+Click "Build With Parameters"
 
-10) Security Best Practices
+Choose:
 
-Prefer STS AssumeRole over long-lived keys.
+ENVIRONMENT = dev | qa | uat | prod
 
-Scope IAM policies minimally (ECR push, EKS describe/update-kubeconfig, any AWS APIs needed by your app).
+IMAGE_TAG optional
 
-Protect secrets in Jenkins folders; use Role-Based Access Control.
+REGION = us-east-2
 
-Restrict kubectl permissions to target namespaces/ops via IRSA or cluster roles.
+Click Build
 
-Consider adding image scanning, OPA Gatekeeper/Kyverno policies, and admission controls.
+🛠 6. Troubleshooting Guide
+❗ Jenkins cannot SSH into the build node
 
-11) Troubleshooting
+Check:
 
-Cannot resolve account ID: verify AWS auth works (STS). Otherwise set a valid AWS_ACCOUNT_ID_FALLBACK.
+sudo tail -f /var/log/auth.log
 
-ECR login fails: ensure repository exists and the IAM principal can ecr:GetAuthorizationToken, ecr:InitiateLayerUpload, etc.
 
-kubectl fails: verify cluster name, region, and access (aws-auth, access entries, or IAM authenticator).
+Verify SSH key permissions:
 
-SonarQube auth: confirm SONAR_HOST_URL and SONAR_TOKEN credentials are set; server reachable from the agent.
+chmod 600 ~/.ssh/authorized_keys
+chmod 700 ~/.ssh
 
-Overlay not found: ensure one of the expected overlay paths exists.
+❗ Docker fails with permission denied
+sudo usermod -aG docker sonar
+newgrp docker
 
-12) Optional Enhancements
+❗ ECR login fails
 
-Quality gates: integrate mvn test, jacoco, spotbugs, checkstyle, owasp-dependency-check.
+Ensure instance profile attached to EC2 has:
 
-PR feedback: post plan/lint results back to GitHub (via Checks API) or Slack threads.
+ecr:GetAuthorizationToken
 
-Blue/Green or Canary: drive progressive delivery via separate overlays and Service selectors.
+❗ EKS authentication fails
 
-Rollback: store previous image tag/build number; add a parameterized rollback stage.
+Ensure the instance profile IAM role is mapped in:
 
-Quick Start Checklist
+kubectl edit configmap aws-auth -n kube-system
 
- Jenkins agent has JDK 17, Maven 3.9+, Docker, AWS CLI, kubectl
 
- Credentials added: slack-webhook-url, SONAR_HOST_URL, SONAR_TOKEN, and (optionally) aws-static-creds
+Add:
 
- ECR repo ${ECR_REPO} exists in ${REGION}
+mapRoles:
+- rolearn: arn:aws:iam::<ACCOUNT_ID>:role/<InstanceProfileRole>
+  username: ci-user
+  groups:
+    - system:masters
 
- EKS cluster ${ENVIRONMENT}-dominion-cluster reachable; kubeconfig update allowed
+🏁 7. Conclusion
 
- Overlays present with patch-deployment.yaml
+This pipeline is engineered for:
 
- (Preferred) ASSUME_ROLE_ARN set; trust policy allows Jenkins principal to assume
+High reliability
+
+Multi-environment deployments
+
+Full AWS cloud-native integration
+
+Enterprise DevSecOps workflows
+
+Secure authentication via Instance Profile
+
+Zero credentials stored in Jenkins

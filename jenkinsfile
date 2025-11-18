@@ -67,8 +67,8 @@ pipeline {
           mvn -B -ntp sonar:sonar \
             -Dsonar.host.url="$SONAR_HOST_URL" \
             -Dsonar.login="$SONAR_TOKEN" \
-            -Dsonar.projectKey=fintech-app-jenkins \
-            -Dsonar.projectName='fintech-app-jenkins' \
+            -Dsonar.projectKey=fintech-app \
+            -Dsonar.projectName='fintech-app' \
             -Dsonar.sources=. \
             -Dsonar.java.binaries=target/classes
         '''

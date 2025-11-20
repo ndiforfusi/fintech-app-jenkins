@@ -234,12 +234,12 @@ pipeline {
     // }
 
     stage('Deploy to Kubernetes (kubeconfig file)') {
-      when {
-        allOf {
-          expression { return !env.CHANGE_ID }
-          anyOf { branch 'main'; branch 'release' }
-        }
-      }
+      // when {
+      //   allOf {
+      //     expression { return !env.CHANGE_ID }
+      //     anyOf { branch 'main'; branch 'release' }
+      //   }
+      // }
       steps {
         sh """
           set -euo pipefail

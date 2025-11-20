@@ -233,7 +233,7 @@ pipeline {
     //   // }
     // }
 
-    stage('Deploy to Kubernetes (kubeconfig file)') {
+  stage('Deploy to Kubernetes (kubeconfig file)') {
       steps {
         // Inject Jenkins values as environment vars for the shell script
         withEnv([
@@ -242,7 +242,8 @@ pipeline {
           "K8S_NAMESPACE=${params.K8S_NAMESPACE}"
         ]) {
           sh '''
-            set -euo pipefail
+            # /bin/sh on this agent does not support `pipefail`, so we use `set -eu`
+            set -eu
 
             echo "Verifying Kubernetes connectivity via kubeconfig credential..."
             kubectl cluster-info || {
@@ -286,17 +287,3 @@ pipeline {
       }
     }
   }
-
-  post {
-    always {
-      sh '''
-        set +e
-        docker image prune -af --filter "until=24h" || true
-        docker container prune -f || true
-        docker volume prune -f || true
-        rm -rf .kube || true   # extra protection
-      '''
-      cleanWs(deleteDirs: true, notFailBuild: true)
-    }
-  }
-}

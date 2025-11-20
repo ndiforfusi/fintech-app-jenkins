@@ -234,58 +234,55 @@ pipeline {
     // }
 
     stage('Deploy to Kubernetes (kubeconfig file)') {
-      // when {
-      //   allOf {
-      //     expression { return !env.CHANGE_ID }
-      //     anyOf { branch 'main'; branch 'release' }
-      //   }
-      // }
       steps {
-        sh """
-          set -euo pipefail
+        // Inject Jenkins values as environment vars for the shell script
+        withEnv([
+          "ENV=${params.ENVIRONMENT}",
+          "IMAGE_URI=${env.IMAGE_URI}",
+          "K8S_NAMESPACE=${params.K8S_NAMESPACE}"
+        ]) {
+          sh '''
+            set -euo pipefail
 
-          echo "Verifying Kubernetes connectivity via kubeconfig credential..."
-          kubectl cluster-info || {
-            echo "ERROR: Unable to reach Kubernetes API" >&2
-            exit 1
-          }
-          kubectl get nodes
+            echo "Verifying Kubernetes connectivity via kubeconfig credential..."
+            kubectl cluster-info || {
+              echo "ERROR: Unable to reach Kubernetes API" >&2
+              exit 1
+            }
+            kubectl get nodes
 
-          ENV="${params.ENVIRONMENT}"
-          IMAGE_URI="${env.IMAGE_URI}"
-          NAMESPACE="${params.K8S_NAMESPACE}"
+            FILE=""
+            for p in "./k8s/overlays/$ENV/patch-deployment.yaml" \
+                     "./fintech-app/k8s/overlays/$ENV/patch-deployment.yaml" \
+                     "/fintech-app/k8s/overlays/$ENV/patch-deployment.yaml"; do
+              if [ -f "$p" ]; then FILE="$p"; break; fi
+            done
 
-          FILE=""
-          for p in "./k8s/overlays/$ENV/patch-deployment.yaml" \\
-                   "./fintech-app/k8s/overlays/$ENV/patch-deployment.yaml" \\
-                   "/fintech-app/k8s/overlays/$ENV/patch-deployment.yaml"; do
-            if [ -f "$p" ]; then FILE="$p"; break; fi
-          done
+            if [ -z "$FILE" ]; then
+              echo "ERROR: patch-deployment.yaml not found for ENV=$ENV" >&2
+              exit 1
+            fi
 
-          if [ -z "$FILE" ]; then
-            echo "ERROR: patch-deployment.yaml not found for ENV=$ENV" >&2
-            exit 1
-          fi
+            echo "Patching $FILE with image: $IMAGE_URI"
+            perl -0777 -pe "s|image:\\s*[\\w\\.\\-]+\\.dkr\\.ecr\\.[\\w-]+\\.amazonaws\\.com/[\\w\\.\\-]+:[\\w\\.\\-]+|image: $IMAGE_URI|g" -i "$FILE"
 
-          echo "Patching $FILE with image: $IMAGE_URI"
-          perl -0777 -pe "s|image:\\s*[\\w\\.\\-]+\\.dkr\\.ecr\\.[\\w-]+\\.amazonaws\\.com/[\\w\\.\\-]+:[\\w\\.\\-]+|image: $IMAGE_URI|g" -i "$FILE"
+            echo "Updated image line:"
+            grep -nE 'image:\\s' "$FILE" | head -1 || true
 
-          echo "Updated image line:"
-          grep -nE 'image:\\s' "$FILE" | head -1 || true
+            OVERLAY_DIR=""
+            for d in "./k8s/overlays/$ENV" "./fintech-app/k8s/overlays/$ENV" "/fintech-app/k8s/overlays/$ENV"; do
+              if [ -d "$d" ]; then OVERLAY_DIR="$d"; break; fi
+            done
 
-          OVERLAY_DIR=""
-          for d in "./k8s/overlays/$ENV" "./fintech-app/k8s/overlays/$ENV" "/fintech-app/k8s/overlays/$ENV"; do
-            if [ -d "$d" ]; then OVERLAY_DIR="$d"; break; fi
-          done
+            if [ -z "$OVERLAY_DIR" ]; then
+              echo "ERROR: Overlay directory for ENV=$ENV not found" >&2
+              exit 1
+            fi
 
-          if [ -z "$OVERLAY_DIR" ]; then
-            echo "ERROR: Overlay directory for ENV=$ENV not found" >&2
-            exit 1
-          fi
-
-          echo "Applying overlay: $OVERLAY_DIR into namespace: $NAMESPACE"
-          kubectl apply -k "$OVERLAY_DIR" -n "$NAMESPACE"
-        """
+            echo "Applying overlay: $OVERLAY_DIR into namespace: $K8S_NAMESPACE"
+            kubectl apply -k "$OVERLAY_DIR" -n "$K8S_NAMESPACE"
+          '''
+        }
       }
     }
   }
@@ -303,5 +300,3 @@ pipeline {
     }
   }
 }
-
-

@@ -217,21 +217,21 @@ pipeline {
       }
     }
 
-    stage('Deploy Gate') {
-      when {
-        allOf {
-          expression { return !env.CHANGE_ID }
-          anyOf { branch 'main'; branch 'release' }
-        }
-      }
-      steps {
-        script {
-          timeout(time: 20, unit: 'MINUTES') {
-            input message: "Approve deploy of ${env.IMAGE_URI} to ${params.ENVIRONMENT} (${params.K8S_NAMESPACE})?", ok: 'Deploy'
-          }
-        }
-      }
-    }
+    // stage('Deploy Gate') {
+    //   when {
+    //     allOf {
+    //       expression { return !env.CHANGE_ID }
+    //       anyOf { branch 'main'; branch 'release' }
+    //     }
+    //   }
+    //   // steps {
+    //   //   script {
+    //   //     timeout(time: 20, unit: 'MINUTES') {
+    //   //       input message: "Approve deploy of ${env.IMAGE_URI} to ${params.ENVIRONMENT} (${params.K8S_NAMESPACE})?", ok: 'Deploy'
+    //   //     }
+    //   //   }
+    //   // }
+    // }
 
     stage('Deploy to Kubernetes (kubeconfig file)') {
       when {

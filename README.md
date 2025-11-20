@@ -280,4 +280,4 @@ Enterprise DevSecOps workflows
 
 Secure authentication via Instance Profile
 
-Zero credentials stored in Jenkins
+Credentials stored in Jenkins as a secret file

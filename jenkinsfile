@@ -4,24 +4,42 @@ pipeline {
   tools { maven 'maven-3-9-11' }
 
   parameters {
-    choice(name: 'ENVIRONMENT', choices: ['dev', 'qa', 'uat', 'prod'], description: 'Deployment Environment')
-    string(name: 'IMAGE_TAG', defaultValue: '', description: 'Docker Image Tag (leave empty to auto-generate timestamp)')
-    string(name: 'REGION', defaultValue: 'us-west-2', description: 'AWS Region')
-    string(name: 'ECR_REPO', defaultValue: 'fintech-app', description: 'ECR repository name')
+    choice(
+      name: 'ENVIRONMENT',
+      choices: ['dev', 'qa', 'uat', 'prod'],
+      description: 'Deployment Environment'
+    )
 
-    // Optional AWS assume-role for ECR auth (still recommended)
+    string(
+      name: 'IMAGE_TAG',
+      defaultValue: '',
+      description: 'Docker Image Tag (leave empty to auto-generate timestamp)'
+    )
+
+    string(
+      name: 'REGION',
+      defaultValue: 'us-west-2',
+      description: 'AWS Region'
+    )
+
+    string(
+      name: 'ECR_REPO',
+      defaultValue: 'fintech-app',
+      description: 'ECR repository name'
+    )
+
     string(
       name: 'ASSUME_ROLE_ARN',
       defaultValue: '',
-      description: 'Optional: STS role ARN to assume for ECR (leave empty to use instance profile)'
+      description: 'Optional: STS role ARN to assume for ECR'
     )
 
-    // Namespace + kubeconfig credential for non-AWS Kubernetes cluster
     string(
       name: 'K8S_NAMESPACE',
       defaultValue: 'default',
       description: 'Kubernetes namespace to deploy into'
     )
+
     string(
       name: 'KUBECONFIG_CREDENTIAL_ID',
       defaultValue: 'kubeconfig-fintech-nonprod',
@@ -31,7 +49,6 @@ pipeline {
 
   environment {
     AWS_REGION = "${params.REGION}"
-    // keep kubeconfig scoped to workspace + cleaned after build
     KUBECONFIG = "${WORKSPACE}/.kube/config"
   }
 
@@ -107,12 +124,11 @@ pipeline {
     }
 
     stage('Assume AWS Role for ECR (Optional)') {
-      when {
-        expression { return params.ASSUME_ROLE_ARN?.trim() }
-      }
+      when { expression { return params.ASSUME_ROLE_ARN?.trim() } }
       steps {
         script {
           echo "Assuming deploy role for ECR: ${params.ASSUME_ROLE_ARN}"
+
           def json = sh(
             script: """
               set -e
@@ -130,7 +146,7 @@ pipeline {
           env.AWS_SECRET_ACCESS_KEY = creds.SecretAccessKey
           env.AWS_SESSION_TOKEN     = creds.SessionToken
 
-          echo "Assumed role successfully for ECR (credentials not printed)."
+          echo "Assumed role successfully."
         }
       }
     }
@@ -152,9 +168,11 @@ pipeline {
             script: 'aws sts get-caller-identity --query Account --output text',
             returnStdout: true
           ).trim()
+
           if (!acct || !(acct ==~ /^[0-9]{12}$/)) {
-            error "Could not resolve valid AWS Account ID from effective AWS identity"
+            error "Could not resolve AWS Account ID"
           }
+
           env.RESOLVED_ACCOUNT_ID = acct
           echo "Resolved AWS Account ID: ${env.RESOLVED_ACCOUNT_ID}"
         }
@@ -176,7 +194,8 @@ pipeline {
         sh """
           set -e
           aws ecr get-login-password --region ${params.REGION} | \
-            docker login --username AWS --password-stdin ${env.RESOLVED_ACCOUNT_ID}.dkr.ecr.${params.REGION}.amazonaws.com
+            docker login --username AWS --password-stdin \
+            ${env.RESOLVED_ACCOUNT_ID}.dkr.ecr.${params.REGION}.amazonaws.com
         """
       }
     }
@@ -184,19 +203,21 @@ pipeline {
     stage('Build & Push Docker Image') {
       steps {
         script {
-          def imageUri = "${env.RESOLVED_ACCOUNT_ID}.dkr.ecr.${params.REGION}.amazonaws.com/${params.ECR_REPO}:${env.EFFECTIVE_IMAGE_TAG}"
+          def imageUri =
+            "${env.RESOLVED_ACCOUNT_ID}.dkr.ecr.${params.REGION}.amazonaws.com/${params.ECR_REPO}:${env.EFFECTIVE_IMAGE_TAG}"
+
           echo "Building ${imageUri}"
+
           sh """
             set -e
             docker build -t ${imageUri} .
             docker push ${imageUri}
           """
+
           env.IMAGE_URI = imageUri
         }
       }
     }
-
-    // ---------- KUBECONFIG FROM JENKINS CREDENTIAL (NO aws eks update-kubeconfig) ----------
 
     stage('Load kubeconfig from Jenkins Credential') {
       steps {
@@ -208,82 +229,92 @@ pipeline {
             cp "${KUBECONFIG_FILE}" "${KUBECONFIG}"
             chmod 600 "${KUBECONFIG}"
 
-            # quick sanity check – DO NOT cat kubeconfig (sensitive)
             kubectl config get-contexts || {
-              echo "WARN: Could not list contexts from kubeconfig"
+              echo "WARN: Could not list contexts"
             }
           '''
         }
       }
     }
 
-    // stage('Deploy Gate') {
-    //   when {
-    //     allOf {
-    //       expression { return !env.CHANGE_ID }
-    //       anyOf { branch 'main'; branch 'release' }
-    //     }
-    //   }
-    //   // steps {
-    //   //   script {
-    //   //     timeout(time: 20, unit: 'MINUTES') {
-    //   //       input message: "Approve deploy of ${env.IMAGE_URI} to ${params.ENVIRONMENT} (${params.K8S_NAMESPACE})?", ok: 'Deploy'
-    //   //     }
-    //   //   }
-    //   // }
-    // }
-
-  stage('Deploy to Kubernetes (kubeconfig file)') {
+    stage('Deploy to Kubernetes (kubeconfig file)') {
       steps {
-        // Inject Jenkins values as environment vars for the shell script
         withEnv([
           "ENV=${params.ENVIRONMENT}",
           "IMAGE_URI=${env.IMAGE_URI}",
           "K8S_NAMESPACE=${params.K8S_NAMESPACE}"
         ]) {
           sh '''
-            # /bin/sh on this agent does not support `pipefail`, so we use `set -eu`
             set -eu
 
-            echo "Verifying Kubernetes connectivity via kubeconfig credential..."
+            echo "Testing Kubernetes connectivity..."
             kubectl cluster-info || {
-              echo "ERROR: Unable to reach Kubernetes API" >&2
+              echo "ERROR: Unable to reach Kubernetes API"
               exit 1
             }
+
             kubectl get nodes
 
             FILE=""
-            for p in "./k8s/overlays/$ENV/patch-deployment.yaml" \
-                     "./fintech-app/k8s/overlays/$ENV/patch-deployment.yaml" \
-                     "/fintech-app/k8s/overlays/$ENV/patch-deployment.yaml"; do
-              if [ -f "$p" ]; then FILE="$p"; break; fi
+            for p in \
+              "./k8s/overlays/$ENV/patch-deployment.yaml" \
+              "./fintech-app/k8s/overlays/$ENV/patch-deployment.yaml" \
+              "/fintech-app/k8s/overlays/$ENV/patch-deployment.yaml"
+            do
+              if [ -f "$p" ]; then
+                FILE="$p"
+                break
+              fi
             done
 
             if [ -z "$FILE" ]; then
-              echo "ERROR: patch-deployment.yaml not found for ENV=$ENV" >&2
+              echo "ERROR: patch-deployment.yaml not found for ENV=$ENV"
               exit 1
             fi
 
-            echo "Patching $FILE with image: $IMAGE_URI"
-            perl -0777 -pe "s|image:\\s*[\\w\\.\\-]+\\.dkr\\.ecr\\.[\\w-]+\\.amazonaws\\.com/[\\w\\.\\-]+:[\\w\\.\\-]+|image: $IMAGE_URI|g" -i "$FILE"
+            echo "Patching deployment file: $FILE"
+            perl -0777 -pe \
+              "s|image:\\s*[\\w\\.\\-]+\\.dkr\\.ecr\\.[\\w-]+\\.amazonaws\\.com/[\\w\\.\\-]+:[\\w\\.\\-]+|image: $IMAGE_URI|g" \
+              -i "$FILE"
 
-            echo "Updated image line:"
-            grep -nE 'image:\\s' "$FILE" | head -1 || true
+            echo "Updated image:"
+            grep -nE 'image:' "$FILE" | head -1 || true
 
             OVERLAY_DIR=""
-            for d in "./k8s/overlays/$ENV" "./fintech-app/k8s/overlays/$ENV" "/fintech-app/k8s/overlays/$ENV"; do
-              if [ -d "$d" ]; then OVERLAY_DIR="$d"; break; fi
+            for d in \
+              "./k8s/overlays/$ENV" \
+              "./fintech-app/k8s/overlays/$ENV" \
+              "/fintech-app/k8s/overlays/$ENV"
+            do
+              if [ -d "$d" ]; then
+                OVERLAY_DIR="$d"
+                break
+              fi
             done
 
             if [ -z "$OVERLAY_DIR" ]; then
-              echo "ERROR: Overlay directory for ENV=$ENV not found" >&2
+              echo "ERROR: Overlay directory not found for ENV=$ENV"
               exit 1
             fi
 
-            echo "Applying overlay: $OVERLAY_DIR into namespace: $K8S_NAMESPACE"
+            echo "Applying overlay: $OVERLAY_DIR"
             kubectl apply -k "$OVERLAY_DIR" -n "$K8S_NAMESPACE"
           '''
         }
       }
+    }
+  }
+
+  post {
+    always {
+      sh '''
+        set +e
+        docker image prune -af --filter "until=24h" || true
+        docker container prune -f || true
+        docker volume prune -f || true
+        rm -rf .kube || true
+      '''
+      cleanWs(deleteDirs: true, notFailBuild: true)
+    }
+  }
 }
-  

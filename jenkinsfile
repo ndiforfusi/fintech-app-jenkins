@@ -1,17 +1,38 @@
 pipeline {
-  agent { label 'maven-sonarqube' } // SSH build node with instance profile
+  agent { label 'maven-sonarqube' }
 
-  tools {maven 'maven-3-9-11'}
+  tools { maven 'maven-3-9-11' }
 
   parameters {
     choice(name: 'ENVIRONMENT', choices: ['dev', 'qa', 'uat', 'prod'], description: 'Deployment Environment')
     string(name: 'IMAGE_TAG', defaultValue: '', description: 'Docker Image Tag (leave empty to auto-generate timestamp)')
     string(name: 'REGION', defaultValue: 'us-west-2', description: 'AWS Region')
     string(name: 'ECR_REPO', defaultValue: 'fintech-app', description: 'ECR repository name')
+
+    // Optional AWS assume-role for ECR auth (still recommended)
+    string(
+      name: 'ASSUME_ROLE_ARN',
+      defaultValue: '',
+      description: 'Optional: STS role ARN to assume for ECR (leave empty to use instance profile)'
+    )
+
+    // Namespace + kubeconfig credential for non-AWS Kubernetes cluster
+    string(
+      name: 'K8S_NAMESPACE',
+      defaultValue: 'default',
+      description: 'Kubernetes namespace to deploy into'
+    )
+    string(
+      name: 'KUBECONFIG_CREDENTIAL_ID',
+      defaultValue: 'kubeconfig-fintech-nonprod',
+      description: 'Jenkins Secret File credential ID holding kubeconfig'
+    )
   }
 
   environment {
     AWS_REGION = "${params.REGION}"
+    // keep kubeconfig scoped to workspace + cleaned after build
+    KUBECONFIG = "${WORKSPACE}/.kube/config"
   }
 
   options {
@@ -75,18 +96,64 @@ pipeline {
       }
     }
 
-    stage('AWS Identity (Instance Profile)') {
+    stage('Base AWS Identity (Instance Profile)') {
       steps {
-        sh 'aws sts get-caller-identity'
+        sh '''
+          set -e
+          echo "Base AWS identity (before optional assume-role):"
+          aws sts get-caller-identity || echo "No instance profile / AWS identity"
+        '''
+      }
+    }
+
+    stage('Assume AWS Role for ECR (Optional)') {
+      when {
+        expression { return params.ASSUME_ROLE_ARN?.trim() }
+      }
+      steps {
+        script {
+          echo "Assuming deploy role for ECR: ${params.ASSUME_ROLE_ARN}"
+          def json = sh(
+            script: """
+              set -e
+              aws sts assume-role \
+                --role-arn '${params.ASSUME_ROLE_ARN}' \
+                --role-session-name 'jenkins-ecr-${params.ENVIRONMENT}' \
+                --query 'Credentials' \
+                --output json
+            """,
+            returnStdout: true
+          ).trim()
+
+          def creds = readJSON(text: json)
+          env.AWS_ACCESS_KEY_ID     = creds.AccessKeyId
+          env.AWS_SECRET_ACCESS_KEY = creds.SecretAccessKey
+          env.AWS_SESSION_TOKEN     = creds.SessionToken
+
+          echo "Assumed role successfully for ECR (credentials not printed)."
+        }
+      }
+    }
+
+    stage('Resolved AWS Identity (Effective)') {
+      steps {
+        sh '''
+          set -e
+          echo "Effective AWS identity (after optional assume-role):"
+          aws sts get-caller-identity || echo "No AWS identity configured"
+        '''
       }
     }
 
     stage('Resolve AWS Account ID') {
       steps {
         script {
-          def acct = sh(script: 'aws sts get-caller-identity --query Account --output text', returnStdout: true).trim()
+          def acct = sh(
+            script: 'aws sts get-caller-identity --query Account --output text',
+            returnStdout: true
+          ).trim()
           if (!acct || !(acct ==~ /^[0-9]{12}$/)) {
-            error "Could not resolve valid AWS Account ID from instance profile"
+            error "Could not resolve valid AWS Account ID from effective AWS identity"
           }
           env.RESOLVED_ACCOUNT_ID = acct
           echo "Resolved AWS Account ID: ${env.RESOLVED_ACCOUNT_ID}"
@@ -129,6 +196,27 @@ pipeline {
       }
     }
 
+    // ---------- KUBECONFIG FROM JENKINS CREDENTIAL (NO aws eks update-kubeconfig) ----------
+
+    stage('Load kubeconfig from Jenkins Credential') {
+      steps {
+        withCredentials([file(credentialsId: "${params.KUBECONFIG_CREDENTIAL_ID}", variable: 'KUBECONFIG_FILE')]) {
+          sh '''
+            set -e
+            echo "Preparing workspace-scoped kubeconfig..."
+            mkdir -p "$(dirname "${KUBECONFIG}")"
+            cp "${KUBECONFIG_FILE}" "${KUBECONFIG}"
+            chmod 600 "${KUBECONFIG}"
+
+            # quick sanity check – DO NOT cat kubeconfig (sensitive)
+            kubectl config get-contexts || {
+              echo "WARN: Could not list contexts from kubeconfig"
+            }
+          '''
+        }
+      }
+    }
+
     stage('Deploy Gate') {
       when {
         allOf {
@@ -139,13 +227,13 @@ pipeline {
       steps {
         script {
           timeout(time: 20, unit: 'MINUTES') {
-            input message: "Approve deploy of ${env.IMAGE_URI} to ${params.ENVIRONMENT}?", ok: 'Deploy'
+            input message: "Approve deploy of ${env.IMAGE_URI} to ${params.ENVIRONMENT} (${params.K8S_NAMESPACE})?", ok: 'Deploy'
           }
         }
       }
     }
 
-    stage('Deploy to EKS') {
+    stage('Deploy to Kubernetes (kubeconfig file)') {
       when {
         allOf {
           expression { return !env.CHANGE_ID }
@@ -156,21 +244,16 @@ pipeline {
         sh """
           set -euo pipefail
 
-          CLUSTER_NAME="${params.ENVIRONMENT}-dominion-cluster"
-          aws eks update-kubeconfig --region ${params.REGION} --name "$CLUSTER_NAME"
-
+          echo "Verifying Kubernetes connectivity via kubeconfig credential..."
+          kubectl cluster-info || {
+            echo "ERROR: Unable to reach Kubernetes API" >&2
+            exit 1
+          }
           kubectl get nodes
-
-          # Optional addons
-          [ -x eks_addons/script/helm_install.sh ] && eks_addons/script/helm_install.sh || true
-          [ -x eks_addons/script/helm_charts.sh ]  && eks_addons/script/helm_charts.sh  || true
-
-          # Monitoring/logging
-          [ -d ./eks_addons/monitoring ] && kubectl apply -k ./eks_addons/monitoring || true
-          [ -d ./eks_addons/elk ]        && kubectl apply -k ./eks_addons/elk        || true
 
           ENV="${params.ENVIRONMENT}"
           IMAGE_URI="${env.IMAGE_URI}"
+          NAMESPACE="${params.K8S_NAMESPACE}"
 
           FILE=""
           for p in "./k8s/overlays/$ENV/patch-deployment.yaml" \\
@@ -188,7 +271,7 @@ pipeline {
           perl -0777 -pe "s|image:\\s*[\\w\\.\\-]+\\.dkr\\.ecr\\.[\\w-]+\\.amazonaws\\.com/[\\w\\.\\-]+:[\\w\\.\\-]+|image: $IMAGE_URI|g" -i "$FILE"
 
           echo "Updated image line:"
-          grep -nE 'image:\\s' "$FILE" | head -1
+          grep -nE 'image:\\s' "$FILE" | head -1 || true
 
           OVERLAY_DIR=""
           for d in "./k8s/overlays/$ENV" "./fintech-app/k8s/overlays/$ENV" "/fintech-app/k8s/overlays/$ENV"; do
@@ -200,8 +283,8 @@ pipeline {
             exit 1
           fi
 
-          echo "Applying overlay: $OVERLAY_DIR"
-          kubectl apply -k "$OVERLAY_DIR"
+          echo "Applying overlay: $OVERLAY_DIR into namespace: $NAMESPACE"
+          kubectl apply -k "$OVERLAY_DIR" -n "$NAMESPACE"
         """
       }
     }
@@ -214,8 +297,11 @@ pipeline {
         docker image prune -af --filter "until=24h" || true
         docker container prune -f || true
         docker volume prune -f || true
+        rm -rf .kube || true   # extra protection
       '''
       cleanWs(deleteDirs: true, notFailBuild: true)
     }
   }
 }
+
+

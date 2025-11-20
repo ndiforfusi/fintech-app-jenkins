@@ -6,7 +6,7 @@ pipeline {
   parameters {
     choice(
       name: 'ENVIRONMENT',
-      choices: ['dev', 'qa', 'uat', 'prod'],
+      choices: ['prod', 'qa', 'uat', 'dev'],
       description: 'Deployment Environment'
     )
 
@@ -36,7 +36,7 @@ pipeline {
 
     string(
       name: 'K8S_NAMESPACE',
-      defaultValue: 'default',
+      defaultValue: 'fintech',
       description: 'Kubernetes namespace to deploy into'
     )
 

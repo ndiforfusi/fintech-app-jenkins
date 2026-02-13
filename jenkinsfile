@@ -42,7 +42,7 @@ pipeline {
 
     string(
       name: 'KUBECONFIG_CREDENTIAL_ID',
-      defaultValue: 'kubeconfig-fintech-nonprod',
+      defaultValue: 'kubeconfig-fintech-prod',
       description: 'Jenkins Secret File credential ID holding kubeconfig'
     )
   }

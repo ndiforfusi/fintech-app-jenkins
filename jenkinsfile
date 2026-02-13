@@ -1,5 +1,5 @@
 pipeline {
-  agent { label 'maven-sonarqube' }
+  agent { label 'ci-cd-node' }
 
   tools { maven 'maven-3-9-11' }
 
@@ -42,7 +42,7 @@ pipeline {
 
     string(
       name: 'KUBECONFIG_CREDENTIAL_ID',
-      defaultValue: 'kubeconfig-fintech-nonprod',
+      defaultValue: 'kubeconfig-fintech-prod',
       description: 'Jenkins Secret File credential ID holding kubeconfig'
     )
   }
@@ -77,7 +77,7 @@ pipeline {
           mvn -version || true
           docker --version
           aws --version || true
-          kubectl version --client=true --short=true || true
+          kubectl version --client=true || true
         """
       }
     }
@@ -105,8 +105,8 @@ pipeline {
           mvn -B -ntp sonar:sonar \
             -Dsonar.host.url="$SONAR_HOST_URL" \
             -Dsonar.login="$SONAR_TOKEN" \
-            -Dsonar.projectKey=fintech-app \
-            -Dsonar.projectName='fintech-app' \
+            -Dsonar.projectKey=fintech-app-jenkins \
+            -Dsonar.projectName='fintech-app-jenkins' \
             -Dsonar.sources=. \
             -Dsonar.java.binaries=target/classes
         '''
@@ -194,7 +194,7 @@ pipeline {
         sh """
           set -e
           aws ecr get-login-password --region ${params.REGION} | \
-            docker login --username AWS --password-stdin \
+            sudo docker login --username AWS --password-stdin \
             ${env.RESOLVED_ACCOUNT_ID}.dkr.ecr.${params.REGION}.amazonaws.com
         """
       }
@@ -210,8 +210,8 @@ pipeline {
 
           sh """
             set -e
-            docker build -t ${imageUri} .
-            docker push ${imageUri}
+            sudo docker build -t ${imageUri} .
+            sudo docker push ${imageUri}
           """
 
           env.IMAGE_URI = imageUri
@@ -309,9 +309,9 @@ pipeline {
     always {
       sh '''
         set +e
-        docker image prune -af --filter "until=24h" || true
-        docker container prune -f || true
-        docker volume prune -f || true
+        sudo docker image prune -af --filter "until=24h" || true
+        sudo docker container prune -f || true
+        sudo docker volume prune -f || true
         rm -rf .kube || true
       '''
       cleanWs(deleteDirs: true, notFailBuild: true)

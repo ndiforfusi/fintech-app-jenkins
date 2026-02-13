@@ -77,7 +77,7 @@ pipeline {
           mvn -version || true
           docker --version
           aws --version || true
-          kubectl version --client=true --short=true || true
+          kubectl version --client=true || true
         """
       }
     }

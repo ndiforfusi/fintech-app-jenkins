@@ -194,7 +194,7 @@ pipeline {
         sh """
           set -e
           aws ecr get-login-password --region ${params.REGION} | \
-            docker login --username AWS --password-stdin \
+            sudo docker login --username AWS --password-stdin \
             ${env.RESOLVED_ACCOUNT_ID}.dkr.ecr.${params.REGION}.amazonaws.com
         """
       }
@@ -210,8 +210,8 @@ pipeline {
 
           sh """
             set -e
-            docker build -t ${imageUri} .
-            docker push ${imageUri}
+            sudo docker build -t ${imageUri} .
+            sudo docker push ${imageUri}
           """
 
           env.IMAGE_URI = imageUri
@@ -309,9 +309,9 @@ pipeline {
     always {
       sh '''
         set +e
-        docker image prune -af --filter "until=24h" || true
-        docker container prune -f || true
-        docker volume prune -f || true
+        sudo docker image prune -af --filter "until=24h" || true
+        sudo docker container prune -f || true
+        sudo docker volume prune -f || true
         rm -rf .kube || true
       '''
       cleanWs(deleteDirs: true, notFailBuild: true)

@@ -1,5 +1,5 @@
 pipeline {
-  agent { label 'maven-sonarqube' }
+  agent { label 'ci-cd-node' }
 
   tools { maven 'maven-3-9-11' }
 
@@ -105,8 +105,8 @@ pipeline {
           mvn -B -ntp sonar:sonar \
             -Dsonar.host.url="$SONAR_HOST_URL" \
             -Dsonar.login="$SONAR_TOKEN" \
-            -Dsonar.projectKey=fintech-app \
-            -Dsonar.projectName='fintech-app' \
+            -Dsonar.projectKey=fintech-app-jenkins \
+            -Dsonar.projectName='fintech-app-jenkins' \
             -Dsonar.sources=. \
             -Dsonar.java.binaries=target/classes
         '''
